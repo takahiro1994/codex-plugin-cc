@@ -1,0 +1,39 @@
+name: XPyRuntime official CPython fetch
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download and verify official CPython Android runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          name='python-3.14.6-aarch64-linux-android.tar.gz'
+          url="https://www.python.org/ftp/python/3.14.6/${name}"
+          expected='38bbe77d3167b5cd554e03b1021324926f09f3825202b065951dd7638e9c37e5'
+          curl --fail --location --retry 5 --retry-all-errors --output "$name" "$url"
+          actual="$(sha256sum "$name" | awk '{print $1}')"
+          test "$actual" = "$expected"
+          printf '%s  %s\n' "$actual" "$name" > SHA256SUMS.txt
+          tar -tzf "$name" | sed -n '1,80p' > CONTENTS.txt
+
+      - name: Upload verified runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: xpyruntime-cpython-3.14.6-android-aarch64
+          path: |
+            python-3.14.6-aarch64-linux-android.tar.gz
+            SHA256SUMS.txt
+            CONTENTS.txt
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
