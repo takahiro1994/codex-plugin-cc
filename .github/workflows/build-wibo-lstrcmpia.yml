@@ -1,0 +1,123 @@
+name: Build wibo 1.2.0 lstrcmpiA
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "wibo-lstrcmpiA/**"
+      - ".github/workflows/build-wibo-lstrcmpia.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: x86_64
+            name: Static Linux x86_64
+            platform: linux/amd64
+          - id: i686
+            name: Static Linux i686
+            platform: linux/386
+
+    steps:
+      - name: Checkout build recipe
+        uses: actions/checkout@v4
+
+      - name: Fetch official wibo 1.2.0 and apply lstrcmpiA patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "4c9f1b9e3c856ff5b4bc64c20363996310965cfc0d0db419e562ab1cd174fe3f  wibo-lstrcmpiA/wibo-1.2.0-lstrcmpiA-compatible.patch" | sha256sum --check -
+          git clone --branch 1.2.0 --depth 1 https://github.com/decompals/wibo.git work/src
+          git -C work/src apply --check "$GITHUB_WORKSPACE/wibo-lstrcmpiA/wibo-1.2.0-lstrcmpiA-compatible.patch"
+          git -C work/src apply "$GITHUB_WORKSPACE/wibo-lstrcmpiA/wibo-1.2.0-lstrcmpiA-compatible.patch"
+          grep -F "int WINAPI lstrcmpiA" work/src/dll/kernel32/winbase.cpp
+          grep -F "test_lstrcmpi" work/src/CMakeLists.txt
+          git -C work/src rev-parse HEAD | tee work/upstream-commit.txt
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker buildx build \
+            --platform "${{ matrix.platform }}" \
+            --target build \
+            --build-arg BUILD_TYPE=release \
+            --build-arg WIBO_VERSION=1.2.0-lstrcmpiA \
+            --load \
+            --tag "wibo-lstrcmpia:${{ matrix.id }}" \
+            work/src
+
+      - name: Run complete test suite
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            "wibo-lstrcmpia:${{ matrix.id }}" \
+            ctest --test-dir /wibo/build --output-on-failure
+
+      - name: Run lstrcmpiA regression test explicitly
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            "wibo-lstrcmpia:${{ matrix.id }}" \
+            ctest --test-dir /wibo/build --output-on-failure -R 'test_lstrcmpi'
+
+      - name: Export release binary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "dist/${{ matrix.id }}"
+          docker buildx build \
+            --platform "${{ matrix.platform }}" \
+            --target export \
+            --build-arg BUILD_TYPE=release \
+            --build-arg WIBO_VERSION=1.2.0-lstrcmpiA \
+            --output "type=local,dest=dist/${{ matrix.id }}" \
+            work/src
+          chmod +x "dist/${{ matrix.id }}/wibo"
+
+      - name: Verify and package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "dist/${{ matrix.id }}"
+          file wibo | tee BUILD_INFO.txt
+          ./wibo --version | tee -a BUILD_INFO.txt
+          printf '\nPlatform: %s\nPatch SHA-256: %s\nUpstream tag: %s\n' \
+            '${{ matrix.platform }}' \
+            '4c9f1b9e3c856ff5b4bc64c20363996310965cfc0d0db419e562ab1cd174fe3f' \
+            '1.2.0' \
+            >> BUILD_INFO.txt
+          sha256sum wibo > SHA256SUMS.txt
+          tar -czf "wibo-1.2.0-lstrcmpiA-${{ matrix.id }}.tar.gz" \
+            wibo BUILD_INFO.txt SHA256SUMS.txt
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wibo-1.2.0-lstrcmpiA-${{ matrix.id }}
+          path: |
+            dist/${{ matrix.id }}/wibo
+            dist/${{ matrix.id }}/BUILD_INFO.txt
+            dist/${{ matrix.id }}/SHA256SUMS.txt
+            dist/${{ matrix.id }}/wibo-1.2.0-lstrcmpiA-${{ matrix.id }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
