@@ -1,0 +1,73 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7deb182..5402568 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -500,6 +500,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
+         wibo_add_fixture_bin(NAME test_findfile SOURCES test/test_findfile.c)
+         wibo_add_fixture_bin(NAME test_getfileattributesex SOURCES test/test_getfileattributesex.c)
+         wibo_add_fixture_bin(NAME test_locale SOURCES test/test_locale.c)
++        wibo_add_fixture_bin(NAME test_lstrcmpi SOURCES test/test_lstrcmpi.c)
+         wibo_add_fixture_bin(NAME test_lstrcpyn SOURCES test/test_lstrcpyn.c)
+         wibo_add_fixture_bin(NAME test_critical_section SOURCES test/test_critical_section.c)
+         wibo_add_fixture_bin(NAME test_synchapi SOURCES test/test_synchapi.c)
+diff --git a/dll/kernel32/winbase.cpp b/dll/kernel32/winbase.cpp
+index 7dba258..6890f23 100644
+--- a/dll/kernel32/winbase.cpp
++++ b/dll/kernel32/winbase.cpp
+@@ -10,6 +10,7 @@
+ #include "modules.h"
+ #include "strutil.h"
+ #include "types.h"
++#include "winnls.h"
+ 
+ #include <algorithm>
+ #include <cassert>
+@@ -395,6 +396,16 @@ void ensureDefaultActivationContext() {
+ 
+ namespace kernel32 {
+ 
++int WINAPI lstrcmpiA(LPCSTR lpString1, LPCSTR lpString2) {
++	HOST_CONTEXT_GUARD();
++	DEBUG_LOG("lstrcmpiA(%p, %p)\n", lpString1, lpString2);
++
++	constexpr LCID kLocaleUserDefault = 0x0400;
++	constexpr DWORD kNormIgnoreCase = 0x00000001;
++	constexpr int kCstrEqual = 2;
++	return CompareStringA(kLocaleUserDefault, kNormIgnoreCase, lpString1, -1, lpString2, -1) - kCstrEqual;
++}
++
+ LPSTR WINAPI lstrcpynA(LPSTR lpString1, LPCSTR lpString2, int iMaxLength) {
+ 	HOST_CONTEXT_GUARD();
+ 	DEBUG_LOG("lstrcpynA(%p, %p, %d)\n", lpString1, lpString2, iMaxLength);
+diff --git a/dll/kernel32/winbase.h b/dll/kernel32/winbase.h
+index 62e6ba6..665e983 100644
+--- a/dll/kernel32/winbase.h
++++ b/dll/kernel32/winbase.h
+@@ -74,6 +74,7 @@ namespace kernel32 {
+ 
+ BOOL WINAPI IsBadReadPtr(LPCVOID lp, UINT_PTR ucb);
+ BOOL WINAPI IsBadWritePtr(LPVOID lp, UINT_PTR ucb);
++int WINAPI lstrcmpiA(LPCSTR lpString1, LPCSTR lpString2);
+ LPSTR WINAPI lstrcpynA(LPSTR lpString1, LPCSTR lpString2, int iMaxLength);
+ ATOM WINAPI FindAtomA(LPCSTR lpString);
+ ATOM WINAPI FindAtomW(LPCWSTR lpString);
+diff --git a/test/test_lstrcmpi.c b/test/test_lstrcmpi.c
+new file mode 100644
+index 0000000..5e8ba83
+--- /dev/null
++++ b/test/test_lstrcmpi.c
+@@ -0,0 +1,14 @@
++#include "test_assert.h"
++
++#include <windows.h>
++
++int main(void) {
++	TEST_CHECK_EQ(0, lstrcmpiA("", ""));
++	TEST_CHECK_EQ(0, lstrcmpiA("LINK.EXE", "link.exe"));
++	TEST_CHECK_EQ(0, lstrcmpiA("Kernel32", "kErNeL32"));
++	TEST_CHECK(lstrcmpiA("abc", "abd") < 0);
++	TEST_CHECK(lstrcmpiA("abd", "abc") > 0);
++	TEST_CHECK(lstrcmpiA("abc", "abcd") < 0);
++	TEST_CHECK(lstrcmpiA("abcd", "abc") > 0);
++	return 0;
++}
