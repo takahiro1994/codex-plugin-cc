@@ -75,10 +75,13 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          # Each docker run starts from the pristine image. Select the fixture
+          # builder together with the regression test so its guest EXE exists.
           docker run --rm \
             --platform "${{ matrix.platform }}" \
             "wibo-lstrcmpia:${{ matrix.id }}" \
-            ctest --test-dir /wibo/build --output-on-failure -R 'test_lstrcmpi'
+            ctest --test-dir /wibo/build --output-on-failure \
+              -R 'wibo\.(build_fixtures|test_lstrcmpi)'
 
       - name: Export release binary
         shell: bash
